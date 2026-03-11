@@ -991,7 +991,7 @@ async function loadQuotes() {
     const res = await fetch(QUOTES_URL + '&t=' + Date.now());
     if (!res.ok) throw new Error();
     const text = await res.text();
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 4);
+    const lines = text.split(/\n\s*\n/).map(l => l.trim().replace(/\n/g, ' ')).filter(l => l.length > 4);
     if (!lines.length) throw new Error();
     renderQuotes(lines);
   } catch {
