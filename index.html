@@ -815,7 +815,12 @@
 </footer>
 
 <script>
-const QUOTES_URL = 'https://docs.google.com/document/d/1iGs7AF5OsyV1h1Ic9_TfE59uhP5JLnl1XXL-lVt_O70/export?format=txt';
+const DOC_TXT_URL = 'https://docs.google.com/document/d/1iGs7AF5OsyV1h1Ic9_TfE59uhP5JLnl1XXL-lVt_O70/export?format=txt';
+const PROXIES = [
+  u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+  u => 'https://corsproxy.io/?' + encodeURIComponent(u),
+  u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
+];
 const REFRESH_INTERVAL = 3 * 60 * 1000;
 
 document.getElementById('footer-copy').textContent = '\u00A9 Aashi ' + new Date().getFullYear();
@@ -980,6 +985,18 @@ function renderQuotes(lines) {
   out.appendChild(grid);
 }
 
+async function fetchWithFallback() {
+  for (const proxy of PROXIES) {
+    try {
+      const res = await fetch(proxy(DOC_TXT_URL), { cache: 'no-store' });
+      if (!res.ok) continue;
+      const text = await res.text();
+      if (text && text.length > 10) return text;
+    } catch {}
+  }
+  throw new Error('all proxies failed');
+}
+
 async function loadQuotes() {
   const out = document.getElementById('quotes-output');
   out.innerHTML =
@@ -988,10 +1005,12 @@ async function loadQuotes() {
       '<span>gathering thoughts\u2026</span>' +
     '</div>';
   try {
-    const res = await fetch(QUOTES_URL + '&t=' + Date.now());
-    if (!res.ok) throw new Error();
-    const text = await res.text();
-    const lines = text.split(/\n\s*\n/).map(l => l.trim().replace(/\n/g, ' ')).filter(l => l.length > 4);
+    const text = await fetchWithFallback();
+    const lines = text
+      .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+      .split(/\n{2,}/)
+      .map(l => l.trim().replace(/\n/g, ' ').replace(/\s+/g, ' '))
+      .filter(l => l.length > 4);
     if (!lines.length) throw new Error();
     renderQuotes(lines);
   } catch {
