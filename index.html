@@ -986,15 +986,14 @@ function renderQuotes(lines) {
 }
 
 async function fetchWithFallback() {
-  for (const proxy of PROXIES) {
-    try {
-      const res = await fetch(proxy(DOC_TXT_URL), { cache: 'no-store' });
-      if (!res.ok) continue;
-      const text = await res.text();
-      if (text && text.length > 10) return text;
-    } catch {}
-  }
-  throw new Error('all proxies failed');
+  const tryProxy = async (proxy) => {
+    const res = await fetch(proxy(DOC_TXT_URL), { cache: 'no-store' });
+    if (!res.ok) throw new Error('bad status');
+    const text = await res.text();
+    if (!text || text.length < 10) throw new Error('empty');
+    return text;
+  };
+  return Promise.any(PROXIES.map(p => tryProxy(p)));
 }
 
 async function loadQuotes() {
