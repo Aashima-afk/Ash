@@ -815,13 +815,19 @@
 </footer>
 
 <script>
+// Primary source: your Cloudflare Worker (reliable, you control it)
+const WORKER_URL = 'https://empty-wood-99d2.ironman64136.workers.dev/';
+
+// Backup source: public Google Docs export link, fetched through public CORS proxies
 const DOC_TXT_URL = 'https://docs.google.com/document/d/1iGs7AF5OsyV1h1Ic9_TfE59uhP5JLnl1XXL-lVt_O70/export?format=txt';
 const PROXIES = [
   u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
   u => 'https://corsproxy.io/?' + encodeURIComponent(u),
   u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
 ];
+
 const REFRESH_INTERVAL = 3 * 60 * 1000;
+const FETCH_TIMEOUT = 8000;
 
 document.getElementById('footer-copy').textContent = '\u00A9 Aashi ' + new Date().getFullYear();
 
@@ -985,39 +991,66 @@ function renderQuotes(lines) {
   out.appendChild(grid);
 }
 
-async function fetchWithFallback() {
-  const tryProxy = async (proxy) => {
-    const res = await fetch(proxy(DOC_TXT_URL), { cache: 'no-store' });
-    if (!res.ok) throw new Error('bad status');
+// Fetch one URL with a timeout; throws if it fails, errors out, or returns too little text
+async function fetchText(url) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT);
+  try {
+    const res = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+    if (!res.ok) throw new Error('bad status ' + res.status);
     const text = await res.text();
     if (!text || text.length < 10) throw new Error('empty');
+    // Guard against a proxy returning an HTML error page instead of the doc text
+    if (/^\s*<(!doctype|html)/i.test(text)) throw new Error('html response');
     return text;
-  };
-  return Promise.any(PROXIES.map(p => tryProxy(p)));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 1) Try the Worker first. 2) If it fails, race the public proxies.
+async function fetchWithFallback() {
+  try {
+    return await fetchText(WORKER_URL);
+  } catch (e) {
+    console.warn('Worker failed, falling back to proxies:', e);
+  }
+  return Promise.any(PROXIES.map(p => fetchText(p(DOC_TXT_URL))));
 }
 
 async function loadQuotes() {
   const out = document.getElementById('quotes-output');
-  out.innerHTML =
-    '<div class="loading-zone">' +
-      '<div class="loader"></div>' +
-      '<span>gathering thoughts\u2026</span>' +
-    '</div>';
+  const firstLoad = !allCards.length;
+
+  // Only show the spinner on the very first load, so the 3-minute refresh doesn't blank the page
+  if (firstLoad) {
+    out.innerHTML =
+      '<div class="loading-zone">' +
+        '<div class="loader"></div>' +
+        '<span>gathering thoughts\u2026</span>' +
+      '</div>';
+  }
+
   try {
     const text = await fetchWithFallback();
     const lines = text
+      .replace(/^\uFEFF/, '')
       .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
       .split(/\n{2,}/)
       .map(l => l.trim().replace(/\n/g, ' ').replace(/\s+/g, ' '))
       .filter(l => l.length > 4);
-    if (!lines.length) throw new Error();
+    if (!lines.length) throw new Error('no quotes');
     renderQuotes(lines);
-  } catch {
-    out.innerHTML =
-      '<div class="error-zone">' +
-        '<div class="err-icon">\uD83C\uDF19</div>' +
-        '<p>Couldn\u2019t fetch the quotes right now.<br>Check back in a moment \u2014 the words will find their way here.</p>' +
-      '</div>';
+  } catch (e) {
+    console.error('All sources failed:', e);
+    // If quotes are already showing, keep them instead of replacing with an error
+    if (firstLoad) {
+      out.innerHTML =
+        '<div class="error-zone">' +
+          '<div class="err-icon">\uD83C\uDF19</div>' +
+          '<p>Couldn\u2019t fetch the quotes right now.<br>Check back in a moment \u2014 the words will find their way here.</p>' +
+        '</div>';
+    }
   }
 }
 
